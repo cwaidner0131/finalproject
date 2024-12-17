@@ -695,40 +695,18 @@ if __name__ == "__main__":
     X = X.reshape(6, 1)  # Ensure it is a 6x1 column vector
     X_arr=[]
     X_arr.append(X)
+    Pk_1=Po
     # Discrete system without stochasticity
     range_var=[]
     range_rate_var=[]
     covariance_var=[]
     for i in range(0,2287-1): #
-
+        print('iteration:',i)
         dt=data1[i+1][0]-data1[i][0]
         #A at current time
+        
         A=calculate_A(X[0][0],X[1][0],X[2][0],mu)
-        x_dot=A@X #define x_dot
-        #STM_at_Current=expm(A*dt) #assumes dSTM  is constant
-        STM_at_Current=A@np.eye(6) #Linearized STM 
-        STM_dot=STM_at_Current #STM_dot which will be integrated
-
-        #integrate z dot
-        x=scipy.integrate.solve_ivp(fun=state_derivative,t_span=(0,dt),y0=X.flatten(),method='DOP853')
-        result_stm = scipy.integrate.solve_ivp(
-            fun=stm_derivative,                 # Function for STM derivative
-            t_span=(0, dt),                     # Time interval
-            y0=STM_at_Current.flatten(),        # Flattened initial STM
-            method='DOP853',
-            args=(A,)                           # Pass A as an additional argument
-        )
-        # Extract the final STM at the end of the integration
-
-        STM_dot = result_stm.y[:, -1].reshape((6, 6))
-
-        Pk_1=STM_dot@Po@STM_dot.T
-        covariance_var.append(Pk_1)
-        X = x.y[:, -1].reshape(6, 1)
-        F=STM_dot
-        dX=F@x_dot #dX
-        X=X+dX*dt #integrate propogation and get new state
-        X_arr.append(X)
+        
         index_num = int(data1[i][1])  # Extract ground station index
         # Check ground station
         if index_num == 0:
@@ -742,11 +720,28 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"Invalid ground station index: {index_num}")
         RSitedot=np.cross([0,0,w],r_obs)
+        H=calculate_H(X.flatten(),index_num,RSite_0,RSite_1,RSite_2)
+        x_dot=A@X #define x_dot
+        #STM_at_Current=expm(A*dt) #assumes dSTM  is constant
+        STM_at_Current=A@np.eye(6) #Linearized STM 
+        STM_dot=STM_at_Current #STM_dot which will be integrated
+        F=expm(A*dt)
+        
+        dX=F@x_dot #dX
+        Pk_1=F@Pk_1@F.T
+        X=X+dX*dt
+        X_arr.append(X)
+        X=X.reshape(6,1)
+        covariance_var.append(Pk_1)
         #Change frames
         r_ecef,rdot_ecef=convert_frame_ECI_to_ECEF(X[:3],X[3:],dt,w)
         phi, lambda1 = convert_frame_ECEF_to_AnglesOnly(r_ecef)
         r_obs_ecef,rdot_obs_ecef=convert_frame_ECI_to_ECEF(r_obs,RSitedot,dt,w)
         range_vec,range_rate_vec=ECEF_to_Topo(phi,lambda1,r_obs_ecef,rdot_ecef,r_ecef,rdot_ecef)
+
+        for i in range(0,3):
+            range_var.append(np.linalg.norm(range_vec))
+            range_rate_var.append(np.dot(range_vec,range_rate_vec)/np.linalg.norm(range_vec))
 
         range_var.append(np.linalg.norm(range_vec))
         range_rate_var.append(range_rate_vec)
@@ -769,6 +764,7 @@ if __name__ == "__main__":
     var_z_dot=[]
     for k in range(0,2287-1):
         P=covariance_var[k]
+        print(P)
         var_x.append(P[0,0])
         var_y.append(P[1,1])
         var_z.append(P[2,2])
@@ -1100,22 +1096,39 @@ if __name__ == "__main__":
         
     rho_arr_easy=np.array(rho_arr_easy)
 
+    threshold = 1000  # Example: filter out values above 10000
+
+    # Create a boolean mask where values are below the threshold
+    '''mask = rho_arr_hard <= threshold
+
+    # Apply the mask to filter rho_arr_hard and corresponding time steps
+    filtered_rho_arr_hard = rho_arr_hard[mask]
+    filtered_time_steps = np.arange(len(rho_arr_hard))[mask]
+    filtered_rho_arr_actual = rho_arr_actual[mask]'''
+
+    rho_arr_actual = data1[:,2]  # Extract the third column (rho)
 
     residuals=rho_arr_easy-rho_arr_actual
+
+    filtered_residuals = residuals[mask]
     print(rho_arr_actual[-1])
     print(rho_arr_easy[-1])
-    y = np.arange(len(rho_arr_easy))  # Ensure y matches the time steps
-    # Plot the data
+    y = np.arange(len(filtered_residuals))  # Ensure y matches the time steps
+
+    stdxyz=[std_x,std_y,std_z]
+    
+    '''# Plot the data
     plt.figure()
-    plt.scatter(y, residuals,s=.1,label="Range (rho-km)-calculated")
-    plt.scatter(y,rho_arr_actual,s=.1,label="Range (rho-km)-actual")
-    plt.title("Range (rho) vs. Time")
+    plt.fill_between(y,3*np.linalg.norm(stdxyz,axis=0),-3*np.linalg.norm(stdxyz,axis=0),color="blue",alpha=0.2,label="±3σ (Uncertainty) of Stoachstic")
+    plt.scatter(y, filtered_residuals,s=.1,label="Range (rho-km)-calculated")
+    #plt.scatter(y,rho_arr_actual,s=.1,label="Range (rho-km)-actual")
+    plt.title("Residuals ")
     plt.xlabel("Time")
     plt.ylabel("Range (rho)")
-    plt.show()
+    plt.show()'''
 
 
-    # Rho dot
+    '''# Rho dot
     rho_dot_arr_actual = data1[:,3]  # Extract the fourth column (rho_dot)
     rho_dot_arr_easy = np.array(rho_dot_easy)  # Convert to numpy array
     # Plot the data
@@ -1126,7 +1139,7 @@ if __name__ == "__main__":
     plt.title("Range Rate (rho_dot) vs. Time")
     plt.xlabel("Time")
     plt.ylabel("Range Rate (rho_dot)")
-    plt.show()
+    plt.show()'''
 
 
     avg_pos=[]
@@ -1191,6 +1204,7 @@ if __name__ == "__main__":
 
 
     residuals=rho_arr_actual-rho_arr_hard
+
     print(rho_arr_actual[-1])
     print(rho_arr_hard[-1])
     y = np.arange(len(rho_arr_hard))  # Ensure y matches the time steps
@@ -1421,12 +1435,12 @@ if __name__ == "__main__":
     std_vz=np.zeros(len(var_vz))
 
     for i in range(0,len(var_x)):
-        std_x[i]=np.sqrt(var_x[i])*1000
-        std_y[i]=np.sqrt(var_y[i])*1000
-        std_z[i]=np.sqrt(var_z[i])*1000
-        std_vx[i]=np.sqrt(var_vx[i])*1000
-        std_vy[i]=np.sqrt(var_vy[i])*1000
-        std_vz[i]=np.sqrt(var_vz[i])*1000
+        std_x[i]=np.sqrt(var_x[i])
+        std_y[i]=np.sqrt(var_y[i])
+        std_z[i]=np.sqrt(var_z[i])
+        std_vx[i]=np.sqrt(var_vx[i])
+        std_vy[i]=np.sqrt(var_vy[i])
+        std_vz[i]=np.sqrt(var_vz[i])
 
     time_steps = np.arange(len(unfiltered_indices))  # Time steps for x-axis
     t=np.arange(0,len(avg_pos))
@@ -1434,21 +1448,21 @@ if __name__ == "__main__":
     fig, axs = plt.subplots(2, 3, figsize=(15, 10))
     fig.suptitle("±3σ Uncertainty, and Position Estimates")
 
-    axs[0, 0].fill_between(time_steps, 3*std_x, -3*std_x, color="blue", alpha=0.2, label="±3σ (Uncertainty)")
+    axs[0, 0].fill_between(time_steps, 3*std_x*1000, -3*std_x*1000, color="blue", alpha=0.2, label="±3σ (Uncertainty)")
     axs[0, 0].plot(t,x_var,label="x")
     axs[0, 0].set_title("Variance of x")
     axs[0, 0].set_xlabel("Time Steps")
     axs[0, 0].set_ylabel("Variance")
     axs[0, 0].grid(True)
 
-    axs[0, 1].fill_between(time_steps, 3*std_y, -3*std_y, color="blue", alpha=0.2, label="±3σ (Uncertainty)")
+    axs[0, 1].fill_between(time_steps, 3*std_y*1000, -3*std_y*1000, color="blue", alpha=0.2, label="±3σ (Uncertainty)")
     axs[0, 1].plot(t,y_var,label="y")
     axs[0, 1].set_title("Variance of y")
     axs[0, 1].set_xlabel("Time Steps")
     axs[0, 1].set_ylabel("Variance")
     axs[0, 1].grid(True)
 
-    axs[0, 2].fill_between(time_steps, 3*std_z, -3*std_z, color="blue", alpha=0.2, label="±3σ (Uncertainty)")
+    axs[0, 2].fill_between(time_steps, 3*std_z*1000, -3*std_z*1000, color="blue", alpha=0.2, label="±3σ (Uncertainty)")
     axs[0, 2].plot(t,z_var,label="z")
     axs[0, 2].set_title("Variance of z")
     axs[0, 2].set_xlabel("Time Steps")
@@ -1475,6 +1489,24 @@ if __name__ == "__main__":
     axs[1, 2].set_xlabel("Time Steps")
     axs[1, 2].set_ylabel("Variance")
     axs[1, 2].grid(True)
+
+    # Adjust layout to prevent overlap
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+
+    #residuals
+
+    residuals=rho_arr_hard-rho_arr_actual
+    y = np.arange(len(rho_arr_hard))  # Ensure y matches the time steps
+    # Plot the data
+    plt.figure()
+    plt.scatter(y, residuals,s=.1,label="Range (rho-km)-calculated")
+    plt.scatter(y,rho_arr_actual,s=.1,label="Range (rho-km)-actual")
+    plt.title("Range (rho) vs. Time")
+    plt.xlabel("Time")
+    plt.ylabel("Range (rho)")
+    plt.show()
+    
 
     # Adjust layout to prevent overlap
     plt.tight_layout(rect=[0, 0, 1, 0.95])
